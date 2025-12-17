@@ -1,0 +1,255 @@
+import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
+import { createPageUrl } from "@/utils";
+import { base44 } from "@/api/base44Client";
+import { useQuery } from "@tanstack/react-query";
+import { format } from "date-fns";
+import {
+  MessageSquare,
+  CheckCircle,
+  XCircle,
+  Clock,
+  Wallet,
+  MapPin,
+  ArrowRight,
+  Loader2,
+  AlertCircle
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+
+export default function MyResponses() {
+  const [user, setUser] = useState(null);
+  const [providerProfile, setProviderProfile] = useState(null);
+
+  useEffect(() => {
+    const loadUser = async () => {
+      try {
+        const isAuth = await base44.auth.isAuthenticated();
+        if (isAuth) {
+          const userData = await base44.auth.me();
+          setUser(userData);
+          
+          const providers = await base44.entities.ServiceProvider.filter({ user_email: userData.email });
+          if (providers.length > 0) {
+            setProviderProfile(providers[0]);
+          }
+        } else {
+          base44.auth.redirectToLogin();
+        }
+      } catch (e) {
+        base44.auth.redirectToLogin();
+      }
+    };
+    loadUser();
+  }, []);
+
+  const { data: responses = [], isLoading: responsesLoading } = useQuery({
+    queryKey: ["myResponses", providerProfile?.id],
+    queryFn: () => base44.entities.JobResponse.filter(
+      { provider_id: providerProfile.id },
+      "-created_date"
+    ),
+    enabled: !!providerProfile?.id,
+  });
+
+  const { data: jobs = [] } = useQuery({
+    queryKey: ["responseJobs", responses],
+    queryFn: async () => {
+      if (responses.length === 0) return [];
+      const jobIds = [...new Set(responses.map(r => r.job_id))];
+      const allJobs = await Promise.all(
+        jobIds.map(id => base44.entities.Job.filter({ id }))
+      );
+      return allJobs.flat();
+    },
+    enabled: responses.length > 0,
+  });
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+      </div>
+    );
+  }
+
+  if (!providerProfile) {
+    return (
+      <div className="min-h-screen bg-slate-50 py-8">
+        <div className="max-w-2xl mx-auto px-4 text-center">
+          <div className="w-20 h-20 mx-auto bg-amber-100 rounded-2xl flex items-center justify-center mb-6">
+            <AlertCircle className="w-10 h-10 text-amber-600" />
+          </div>
+          <h1 className="text-2xl font-bold text-slate-900 mb-3">Create Your Profile First</h1>
+          <p className="text-slate-600 mb-6">
+            You need a service provider profile to respond to jobs and track your responses
+          </p>
+          <Link to={createPageUrl("MyProfile")}>
+            <Button className="bg-emerald-600 hover:bg-emerald-700">
+              Create Profile
+            </Button>
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const getJob = (jobId) => jobs.find(j => j.id === jobId);
+
+  const pendingResponses = responses.filter(r => r.status === "pending");
+  const acceptedResponses = responses.filter(r => r.status === "accepted");
+  const rejectedResponses = responses.filter(r => r.status === "rejected");
+
+  const statusColors = {
+    pending: "bg-amber-100 text-amber-700",
+    accepted: "bg-emerald-100 text-emerald-700",
+    rejected: "bg-red-100 text-red-700",
+  };
+
+  const statusIcons = {
+    pending: Clock,
+    accepted: CheckCircle,
+    rejected: XCircle,
+  };
+
+  const ResponseCard = ({ response }) => {
+    const job = getJob(response.job_id);
+    const StatusIcon = statusIcons[response.status];
+
+    if (!job) return null;
+
+    return (
+      <Card className="border-0 shadow-md hover:shadow-lg transition-shadow">
+        <CardContent className="p-6">
+          <div className="flex items-start justify-between gap-4 mb-4">
+            <div className="flex-1">
+              <Badge className="bg-slate-100 text-slate-700 mb-2">{job.category}</Badge>
+              <Link 
+                to={createPageUrl(`JobDetails?id=${job.id}`)}
+                className="block text-lg font-semibold text-slate-900 hover:text-emerald-600"
+              >
+                {job.title}
+              </Link>
+              <div className="flex items-center gap-3 text-sm text-slate-500 mt-1">
+                <span className="flex items-center gap-1">
+                  <MapPin className="w-3 h-3" />
+                  {job.city}, {job.province}
+                </span>
+                <span>•</span>
+                <span>Posted by {job.client_name}</span>
+              </div>
+            </div>
+            
+            <Badge className={statusColors[response.status]}>
+              <StatusIcon className="w-3 h-3 mr-1" />
+              {response.status}
+            </Badge>
+          </div>
+
+          <div className="bg-slate-50 rounded-lg p-4 mb-4">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <p className="text-sm text-slate-500">Your Quote</p>
+                <p className="text-xl font-bold text-slate-900">
+                  R{response.proposed_price?.toLocaleString()}
+                </p>
+              </div>
+              {response.estimated_duration && (
+                <div>
+                  <p className="text-sm text-slate-500">Est. Duration</p>
+                  <p className="text-lg font-semibold text-slate-700">
+                    {response.estimated_duration}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <span className="text-xs text-slate-400">
+              Responded {format(new Date(response.created_date), "dd MMM yyyy")}
+            </span>
+            
+            <Link to={createPageUrl(`JobDetails?id=${job.id}`)}>
+              <Button variant="ghost" size="sm">
+                View Job
+                <ArrowRight className="w-4 h-4 ml-1" />
+              </Button>
+            </Link>
+          </div>
+
+          {response.status === "accepted" && (
+            <div className="mt-4 pt-4 border-t border-slate-200">
+              <div className="bg-emerald-50 rounded-lg p-3 flex items-center gap-2">
+                <CheckCircle className="w-5 h-5 text-emerald-600" />
+                <div>
+                  <p className="font-medium text-emerald-700">Congratulations! Your response was accepted</p>
+                  <p className="text-sm text-emerald-600">Contact the client to discuss next steps</p>
+                </div>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 py-8">
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+        {/* Header */}
+        <div className="mb-8">
+          <h1 className="text-3xl font-bold text-slate-900">My Responses</h1>
+          <p className="mt-1 text-slate-600">
+            Track the status of jobs you've responded to
+          </p>
+        </div>
+
+        {/* Stats */}
+        <div className="grid grid-cols-3 gap-4 mb-8">
+          <Card className="border-0 shadow-sm">
+            <CardContent className="p-4 text-center">
+              <div className="w-10 h-10 mx-auto bg-amber-100 rounded-full flex items-center justify-center mb-2">
+                <Clock className="w-5 h-5 text-amber-600" />
+              </div>
+              <p className="text-2xl font-bold text-slate-900">{pendingResponses.length}</p>
+              <p className="text-sm text-slate-500">Pending</p>
+            </CardContent>
+          </Card>
+          
+          <Card className="border-0 shadow-sm">
+            <CardContent className="p-4 text-center">
+              <div className="w-10 h-10 mx-auto bg-emerald-100 rounded-full flex items-center justify-center mb-2">
+                <CheckCircle className="w-5 h-5 text-emerald-600" />
+              </div>
+              <p className="text-2xl font-bold text-slate-900">{acceptedResponses.length}</p>
+              <p className="text-sm text-slate-500">Accepted</p>
+            </CardContent>
+          </Card>
+          
+          <Card className="border-0 shadow-sm">
+            <CardContent className="p-4 text-center">
+              <div className="w-10 h-10 mx-auto bg-red-100 rounded-full flex items-center justify-center mb-2">
+                <XCircle className="w-5 h-5 text-red-600" />
+              </div>
+              <p className="text-2xl font-bold text-slate-900">{rejectedResponses.length}</p>
+              <p className="text-sm text-slate-500">Rejected</p>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Responses */}
+        {responsesLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+          </div>
+        ) : responses.length > 0 ? (
+          <Tabs defaultValue="all">
+            <TabsList className="mb-6">
+              <TabsTrigger value="all">All ({responses.length})</TabsTrigger>
+              <TabsTrigger value="pending">Pending ({pendingResponses.length})</TabsTrigger>
+              <TabsTrigger value="accepted">Accepted ({acceptedResponses.length})</TabsTrigger>
+ 
