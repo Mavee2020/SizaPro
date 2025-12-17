@@ -1,0 +1,255 @@
+import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
+import { createPageUrl } from "@/utils";
+import { base44 } from "@/api/base44Client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { format } from "date-fns";
+import {
+  ArrowLeft,
+  CheckCircle,
+  XCircle,
+  Clock,
+  Wallet,
+  User,
+  Mail,
+  Phone,
+  MessageSquare,
+  Loader2,
+  ExternalLink
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { toast } from "sonner";
+
+export default function JobResponses() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const jobId = urlParams.get("jobId");
+  const queryClient = useQueryClient();
+  
+  const [user, setUser] = useState(null);
+  const [actionResponse, setActionResponse] = useState(null);
+  const [actionType, setActionType] = useState(null);
+
+  useEffect(() => {
+    const loadUser = async () => {
+      try {
+        const isAuth = await base44.auth.isAuthenticated();
+        if (isAuth) {
+          const userData = await base44.auth.me();
+          setUser(userData);
+        } else {
+          base44.auth.redirectToLogin();
+        }
+      } catch (e) {
+        base44.auth.redirectToLogin();
+      }
+    };
+    loadUser();
+  }, []);
+
+  const { data: job } = useQuery({
+    queryKey: ["job", jobId],
+    queryFn: async () => {
+      const jobs = await base44.entities.Job.filter({ id: jobId });
+      return jobs[0];
+    },
+    enabled: !!jobId,
+  });
+
+  const { data: responses = [], isLoading } = useQuery({
+    queryKey: ["responses", jobId],
+    queryFn: () => base44.entities.JobResponse.filter({ job_id: jobId }, "-created_date"),
+    enabled: !!jobId,
+  });
+
+  const { data: providers = [] } = useQuery({
+    queryKey: ["responseProviders", responses],
+    queryFn: async () => {
+      if (responses.length === 0) return [];
+      const providerIds = [...new Set(responses.map(r => r.provider_id))];
+      const allProviders = await Promise.all(
+        providerIds.map(id => base44.entities.ServiceProvider.filter({ id }))
+      );
+      return allProviders.flat();
+    },
+    enabled: responses.length > 0,
+  });
+
+  const statusMutation = useMutation({
+    mutationFn: async ({ responseId, status }) => {
+      await base44.entities.JobResponse.update(responseId, { status });
+      
+      if (status === "accepted") {
+        // Update job status
+        await base44.entities.Job.update(jobId, { status: "in_progress" });
+      }
+    },
+    onSuccess: (_, { status }) => {
+      toast.success(status === "accepted" ? "Response accepted!" : "Response rejected");
+      queryClient.invalidateQueries(["responses", jobId]);
+      queryClient.invalidateQueries(["job", jobId]);
+      setActionResponse(null);
+      setActionType(null);
+    },
+    onError: () => {
+      toast.error("Failed to update response");
+    },
+  });
+
+  const getProvider = (providerId) => providers.find(p => p.id === providerId);
+
+  if (!user || isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+      </div>
+    );
+  }
+
+  // Check if user owns this job
+  if (job && job.client_email !== user.email) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-xl font-semibold text-slate-900 mb-2">Access Denied</h2>
+          <p className="text-slate-500 mb-4">You can only view responses for your own jobs</p>
+          <Link to={createPageUrl("MyJobs")}>
+            <Button>Back to My Jobs</Button>
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const statusColors = {
+    pending: "bg-amber-100 text-amber-700",
+    accepted: "bg-emerald-100 text-emerald-700",
+    rejected: "bg-red-100 text-red-700",
+  };
+
+  const statusIcons = {
+    pending: Clock,
+    accepted: CheckCircle,
+    rejected: XCircle,
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 py-8">
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+        {/* Back Button */}
+        <Link to={createPageUrl("MyJobs")}>
+          <Button variant="ghost" className="mb-6">
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back to My Jobs
+          </Button>
+        </Link>
+
+        {/* Job Info */}
+        {job && (
+          <Card className="border-0 shadow-lg mb-6">
+            <CardContent className="p-6">
+              <Badge className="bg-emerald-100 text-emerald-700 mb-2">{job.category}</Badge>
+              <h1 className="text-2xl font-bold text-slate-900">{job.title}</h1>
+              <p className="text-slate-500 mt-1">
+                {responses.length} response{responses.length !== 1 ? "s" : ""} received
+              </p>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Responses */}
+        <div className="space-y-4">
+          <h2 className="text-lg font-semibold text-slate-900">Responses</h2>
+          
+          {responses.length > 0 ? (
+            responses.map((response) => {
+              const provider = getProvider(response.provider_id);
+              const StatusIcon = statusIcons[response.status];
+              const initials = provider?.business_name?.split(" ").map(n => n[0]).join("").toUpperCase().slice(0, 2) || "SP";
+
+              return (
+                <Card key={response.id} className="border-0 shadow-lg">
+                  <CardContent className="p-6">
+                    <div className="flex items-start justify-between gap-4 mb-4">
+                      <div className="flex items-center gap-4">
+                        <Link to={createPageUrl(`ProviderProfile?id=${response.provider_id}`)}>
+                          <Avatar className="w-14 h-14 border-2 border-emerald-100">
+                            <AvatarImage src={provider?.profile_image} />
+                            <AvatarFallback className="bg-gradient-to-br from-emerald-500 to-teal-600 text-white">
+                              {initials}
+                            </AvatarFallback>
+                          </Avatar>
+                        </Link>
+                        
+                        <div>
+                          <Link 
+                            to={createPageUrl(`ProviderProfile?id=${response.provider_id}`)}
+                            className="font-semibold text-slate-900 hover:text-emerald-600 flex items-center gap-1"
+                          >
+                            {provider?.business_name || "Service Provider"}
+                            <ExternalLink className="w-3 h-3" />
+                          </Link>
+                          <div className="flex items-center gap-3 text-sm text-slate-500 mt-1">
+                            {provider?.city && (
+                              <span>{provider.city}, {provider.province}</span>
+                            )}
+                            {provider?.experience_years && (
+                              <span>{provider.experience_years} yrs exp</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <Badge className={statusColors[response.status]}>
+                        <StatusIcon className="w-3 h-3 mr-1" />
+                        {response.status}
+                      </Badge>
+                    </div>
+
+                    {/* Proposal */}
+                    <div className="bg-slate-50 rounded-xl p-4 mb-4">
+                      <div className="flex items-start gap-2 mb-2">
+                        <MessageSquare className="w-4 h-4 text-slate-400 mt-0.5" />
+                        <p className="text-slate-700">{response.message}</p>
+                      </div>
+                    </div>
+
+                    {/* Quote Info */}
+                    <div className="grid grid-cols-2 gap-4 mb-4">
+                      <div className="bg-emerald-50 rounded-lg p-3">
+                        <div className="flex items-center gap-2 text-sm text-emerald-600 mb-1">
+                          <Wallet className="w-4 h-4" />
+                          Proposed Price
+                        </div>
+                        <p className="text-xl font-bold text-emerald-700">
+                          R{response.proposed_price?.toLocaleString()}
+                        </p>
+                      </div>
+                      
+                      {response.estimated_duration && (
+                        <div className="bg-blue-50 rounded-lg p-3">
+                          <div className="flex items-center gap-2 text-sm text-blue-600 mb-1">
+                            <Clock className="w-4 h-4" />
+                            Est. Duration
+                          </div>
+                          <p className="text-xl font-bold text-blue-700">
+                            {response.estimated_duration}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Contact Info (only for accepted) */}
+ 
