@@ -1,0 +1,255 @@
+import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
+import { createPageUrl } from "@/utils";
+import { base44 } from "@/api/base44Client";
+import { useQuery } from "@tanstack/react-query";
+import { format } from "date-fns";
+import {
+  MapPin,
+  Clock,
+  Wallet,
+  Phone,
+  Mail,
+  ArrowLeft,
+  CheckCircle2,
+  Star,
+  Briefcase,
+  Calendar,
+  Image,
+  Loader2
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+
+export default function ProviderProfile() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const providerId = urlParams.get("id");
+  const [user, setUser] = useState(null);
+
+  useEffect(() => {
+    const loadUser = async () => {
+      try {
+        const isAuth = await base44.auth.isAuthenticated();
+        if (isAuth) {
+          const userData = await base44.auth.me();
+          setUser(userData);
+        }
+      } catch (e) {
+        console.log("Not authenticated");
+      }
+    };
+    loadUser();
+  }, []);
+
+  const { data: provider, isLoading } = useQuery({
+    queryKey: ["provider", providerId],
+    queryFn: async () => {
+      const providers = await base44.entities.ServiceProvider.filter({ id: providerId });
+      return providers[0];
+    },
+    enabled: !!providerId,
+  });
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+      </div>
+    );
+  }
+
+  if (!provider) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-xl font-semibold text-slate-900 mb-2">Provider not found</h2>
+          <Link to={createPageUrl("Providers")}>
+            <Button>Back to Providers</Button>
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const initials = provider.business_name
+    ?.split(" ")
+    .map(n => n[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
+
+  return (
+    <div className="min-h-screen bg-slate-50 py-8">
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+        {/* Back Button */}
+        <Link to={createPageUrl("Providers")}>
+          <Button variant="ghost" className="mb-6">
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back to Providers
+          </Button>
+        </Link>
+
+        <div className="grid gap-6">
+          {/* Profile Header */}
+          <Card className="border-0 shadow-lg overflow-hidden">
+            <div className="h-32 bg-gradient-to-br from-emerald-500 to-teal-600" />
+            <CardContent className="relative pt-0">
+              <div className="flex flex-col sm:flex-row items-start sm:items-end gap-4 -mt-12 mb-6">
+                <Avatar className="w-24 h-24 border-4 border-white shadow-lg">
+                  <AvatarImage src={provider.profile_image} alt={provider.business_name} />
+                  <AvatarFallback className="bg-gradient-to-br from-emerald-500 to-teal-600 text-white text-2xl">
+                    {initials}
+                  </AvatarFallback>
+                </Avatar>
+                
+                <div className="flex-1">
+                  <div className="flex items-center gap-2">
+                    <h1 className="text-2xl font-bold text-slate-900">
+                      {provider.business_name}
+                    </h1>
+                    {provider.is_verified && (
+                      <CheckCircle2 className="w-5 h-5 text-emerald-500" />
+                    )}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-4 mt-2 text-sm text-slate-600">
+                    <span className="flex items-center gap-1">
+                      <MapPin className="w-4 h-4 text-slate-400" />
+                      {provider.city}, {provider.province}
+                    </span>
+                    {provider.experience_years && (
+                      <span className="flex items-center gap-1">
+                        <Clock className="w-4 h-4 text-slate-400" />
+                        {provider.experience_years} years experience
+                      </span>
+                    )}
+                    <span className="flex items-center gap-1">
+                      <Calendar className="w-4 h-4 text-slate-400" />
+                      Member since {format(new Date(provider.created_date), "MMM yyyy")}
+                    </span>
+                  </div>
+                </div>
+
+                {provider.hourly_rate && (
+                  <div className="bg-emerald-50 rounded-xl px-4 py-2 text-center">
+                    <span className="text-2xl font-bold text-emerald-700">
+                      R{provider.hourly_rate}
+                    </span>
+                    <span className="text-sm text-emerald-600">/hr</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Skills */}
+              {provider.skills?.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {provider.skills.map((skill, idx) => (
+                    <Badge 
+                      key={idx}
+                      className="bg-emerald-100 text-emerald-700 border-emerald-200"
+                    >
+                      {skill}
+                    </Badge>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* About */}
+          {provider.description && (
+            <Card className="border-0 shadow-lg">
+              <CardHeader>
+                <CardTitle className="text-lg">About</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-slate-600 whitespace-pre-line">{provider.description}</p>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Portfolio */}
+          {provider.portfolio_images?.length > 0 && (
+            <Card className="border-0 shadow-lg">
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <Image className="w-5 h-5 text-slate-400" />
+                  Portfolio
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                  {provider.portfolio_images.map((url, idx) => (
+                    <a 
+                      key={idx}
+                      href={url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="aspect-square rounded-xl overflow-hidden bg-slate-100 hover:opacity-90 transition-opacity"
+                    >
+                      <img 
+                        src={url} 
+                        alt={`Portfolio ${idx + 1}`} 
+                        className="w-full h-full object-cover"
+                      />
+                    </a>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Contact Card */}
+          <Card className="border-0 shadow-lg">
+            <CardHeader>
+              <CardTitle className="text-lg">Contact Information</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-3">
+                {provider.phone && (
+                  <a 
+                    href={`tel:${provider.phone}`}
+                    className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg hover:bg-emerald-50 transition-colors"
+                  >
+                    <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center">
+                      <Phone className="w-5 h-5 text-emerald-600" />
+                    </div>
+                    <div>
+                      <p className="text-sm text-slate-500">Phone</p>
+                      <p className="font-medium text-slate-900">{provider.phone}</p>
+                    </div>
+                  </a>
+                )}
+                
+                <a 
+                  href={`mailto:${provider.user_email}`}
+                  className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg hover:bg-emerald-50 transition-colors"
+                >
+                  <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center">
+                    <Mail className="w-5 h-5 text-emerald-600" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-slate-500">Email</p>
+                    <p className="font-medium text-slate-900">{provider.user_email}</p>
+                  </div>
+                </a>
+              </div>
+
+              <p className="text-sm text-slate-500 mt-4">
+                💡 Siza (Help): Post a job to receive personalized quotes from this and other providers
+              </p>
+              
+              <Link to={createPageUrl("PostJob")}>
+                <Button className="w-full mt-4 bg-emerald-600 hover:bg-emerald-700">
+                  <Briefcase className="w-4 h-4 mr-2" />
+                  Post a Job
+                </Button>
+              </Link>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+}
