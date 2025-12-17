@@ -1,0 +1,310 @@
+import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
+import { createPageUrl } from "@/utils";
+import { base44 } from "@/api/base44Client";
+import { useMutation } from "@tanstack/react-query";
+import {
+  Briefcase,
+  MapPin,
+  Wallet,
+  Calendar,
+  Plus,
+  X,
+  Loader2,
+  CheckCircle
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Badge } from "@/components/ui/badge";
+import { toast } from "sonner";
+
+const categories = [
+  "Plumbing",
+  "Electrical",
+  "Carpentry",
+  "Painting",
+  "Cleaning",
+  "Gardening",
+  "Security",
+  "IT Services",
+  "Photography",
+  "Catering",
+  "Beauty & Wellness",
+  "Automotive",
+  "Construction",
+  "Moving & Delivery",
+  "Tutoring",
+  "Legal Services",
+  "Accounting",
+  "Marketing",
+  "Design",
+  "Other",
+];
+
+const provinces = [
+  "Gauteng",
+  "Western Cape",
+  "KwaZulu-Natal",
+  "Eastern Cape",
+  "Free State",
+  "Limpopo",
+  "Mpumalanga",
+  "North West",
+  "Northern Cape",
+];
+
+export default function PostJob() {
+  const navigate = useNavigate();
+  const [user, setUser] = useState(null);
+  const [skillInput, setSkillInput] = useState("");
+  const [formData, setFormData] = useState({
+    title: "",
+    description: "",
+    category: "",
+    required_skills: [],
+    budget_min: "",
+    budget_max: "",
+    province: "",
+    city: "",
+    deadline: "",
+    client_name: "",
+    client_phone: ""
+  });
+
+  useEffect(() => {
+    const loadUser = async () => {
+      try {
+        const isAuth = await base44.auth.isAuthenticated();
+        if (isAuth) {
+          const userData = await base44.auth.me();
+          setUser(userData);
+          setFormData(prev => ({
+            ...prev,
+            client_name: userData.full_name || "",
+          }));
+        } else {
+          base44.auth.redirectToLogin();
+        }
+      } catch (e) {
+        base44.auth.redirectToLogin();
+      }
+    };
+    loadUser();
+  }, []);
+
+  const createJobMutation = useMutation({
+    mutationFn: async () => {
+      return base44.entities.Job.create({
+        ...formData,
+        budget_min: formData.budget_min ? parseFloat(formData.budget_min) : null,
+        budget_max: formData.budget_max ? parseFloat(formData.budget_max) : null,
+        client_email: user.email,
+        status: "open",
+        response_count: 0
+      });
+    },
+    onSuccess: (data) => {
+      toast.success("Job posted successfully!");
+      navigate(createPageUrl(`JobDetails?id=${data.id}`));
+    },
+    onError: (error) => {
+      toast.error("Failed to post job. Please try again.");
+    },
+  });
+
+  const handleInputChange = (field, value) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const addSkill = () => {
+    if (skillInput.trim() && !formData.required_skills.includes(skillInput.trim())) {
+      setFormData(prev => ({
+        ...prev,
+        required_skills: [...prev.required_skills, skillInput.trim()]
+      }));
+      setSkillInput("");
+    }
+  };
+
+  const removeSkill = (skill) => {
+    setFormData(prev => ({
+      ...prev,
+      required_skills: prev.required_skills.filter(s => s !== skill)
+    }));
+  };
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    
+    if (!formData.title || !formData.description || !formData.category || !formData.province || !formData.client_name) {
+      toast.error("Please fill in all required fields");
+      return;
+    }
+
+    createJobMutation.mutate();
+  };
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-50 py-8">
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8">
+        {/* Header */}
+        <div className="text-center mb-8">
+          <div className="w-16 h-16 mx-auto bg-emerald-100 rounded-2xl flex items-center justify-center mb-4">
+            <Briefcase className="w-8 h-8 text-emerald-600" />
+          </div>
+          <h1 className="text-3xl font-bold text-slate-900">Post a Job</h1>
+          <p className="mt-2 text-slate-600">
+            Describe what you need and get responses from skilled professionals
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmit}>
+          <Card className="border-0 shadow-lg mb-6">
+            <CardHeader>
+              <CardTitle className="text-lg">Job Details</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div>
+                <Label htmlFor="title">Job Title *</Label>
+                <Input
+                  id="title"
+                  placeholder="e.g. Need a plumber to fix kitchen sink"
+                  value={formData.title}
+                  onChange={(e) => handleInputChange("title", e.target.value)}
+                  className="mt-1.5"
+                />
+              </div>
+
+              <div>
+                <Label htmlFor="category">Category *</Label>
+                <Select 
+                  value={formData.category} 
+                  onValueChange={(value) => handleInputChange("category", value)}
+                >
+                  <SelectTrigger className="mt-1.5">
+                    <SelectValue placeholder="Select a category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {categories.map((cat) => (
+                      <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div>
+                <Label htmlFor="description">Description *</Label>
+                <Textarea
+                  id="description"
+                  placeholder="Describe the job in detail. Include any specific requirements or expectations..."
+                  value={formData.description}
+                  onChange={(e) => handleInputChange("description", e.target.value)}
+                  className="mt-1.5 min-h-32"
+                />
+              </div>
+
+              <div>
+                <Label>Required Skills</Label>
+                <div className="flex gap-2 mt-1.5">
+                  <Input
+                    placeholder="Add a skill"
+                    value={skillInput}
+                    onChange={(e) => setSkillInput(e.target.value)}
+                    onKeyPress={(e) => e.key === "Enter" && (e.preventDefault(), addSkill())}
+                  />
+                  <Button type="button" onClick={addSkill} variant="outline">
+                    <Plus className="w-4 h-4" />
+                  </Button>
+                </div>
+                {formData.required_skills.length > 0 && (
+                  <div className="flex flex-wrap gap-2 mt-3">
+                    {formData.required_skills.map((skill) => (
+                      <Badge key={skill} variant="secondary" className="bg-emerald-100 text-emerald-700">
+                        {skill}
+                        <button type="button" onClick={() => removeSkill(skill)} className="ml-1">
+                          <X className="w-3 h-3" />
+                        </button>
+                      </Badge>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-0 shadow-lg mb-6">
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <MapPin className="w-5 h-5 text-slate-400" />
+                Location
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="province">Province *</Label>
+                  <Select 
+                    value={formData.province} 
+                    onValueChange={(value) => handleInputChange("province", value)}
+                  >
+                    <SelectTrigger className="mt-1.5">
+                      <SelectValue placeholder="Select province" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {provinces.map((prov) => (
+                        <SelectItem key={prov} value={prov}>{prov}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="city">City / Town</Label>
+                  <Input
+                    id="city"
+                    placeholder="e.g. Johannesburg"
+                    value={formData.city}
+                    onChange={(e) => handleInputChange("city", e.target.value)}
+                    className="mt-1.5"
+                  />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Card className="border-0 shadow-lg mb-6">
+            <CardHeader>
+              <CardTitle className="text-lg flex items-center gap-2">
+                <Wallet className="w-5 h-5 text-slate-400" />
+                Budget & Timeline
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="budget_min">Minimum Budget (ZAR)</Label>
+                  <Input
+                    id="budget_min"
+                    type="number"
+                    placeholder="e.g. 500"
+                    value={formData.budget_min}
+                    onChange={(e) => handleInputChange("budget_min", e.target.value)}
+                    className="mt-1.5"
+ 
