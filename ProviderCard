@@ -1,0 +1,91 @@
+import { MapPin, Star, Clock, CheckCircle2, ChevronRight } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { Link } from "react-router-dom";
+import { createPageUrl } from "@/utils";
+
+export default function ProviderCard({ provider }) {
+  const initials = provider.business_name
+    ?.split(" ")
+    .map(n => n[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
+
+  return (
+    <Link to={createPageUrl(`ProviderProfile?id=${provider.id}`)}>
+      <Card className="group p-6 hover:shadow-xl transition-all duration-300 border-0 bg-white hover:bg-gradient-to-br hover:from-white hover:to-emerald-50/30 cursor-pointer">
+        <div className="flex items-start gap-4">
+          <Avatar className="w-14 h-14 border-2 border-emerald-100">
+            <AvatarImage src={provider.profile_image} alt={provider.business_name} />
+            <AvatarFallback className="bg-gradient-to-br from-emerald-500 to-teal-600 text-white font-semibold">
+              {initials}
+            </AvatarFallback>
+          </Avatar>
+          
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2">
+              <h3 className="text-lg font-semibold text-slate-900 group-hover:text-emerald-700 transition-colors truncate">
+                {provider.business_name}
+              </h3>
+              {provider.is_verified && (
+                <CheckCircle2 className="w-4 h-4 text-emerald-500 flex-shrink-0" />
+              )}
+            </div>
+            
+            <div className="flex items-center gap-3 mt-1 text-sm text-slate-500">
+              <span className="flex items-center gap-1">
+                <MapPin className="w-3.5 h-3.5" />
+                {provider.city}, {provider.province}
+              </span>
+              {provider.experience_years && (
+                <span className="flex items-center gap-1">
+                  <Clock className="w-3.5 h-3.5" />
+                  {provider.experience_years} yrs exp
+                </span>
+              )}
+            </div>
+            
+            <p className="text-slate-500 text-sm mt-2 line-clamp-2">
+              {provider.description}
+            </p>
+            
+            {provider.skills?.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-3">
+                {provider.skills.slice(0, 3).map((skill, idx) => (
+                  <Badge 
+                    key={idx}
+                    variant="secondary"
+                    className="bg-slate-100 text-slate-600 text-xs"
+                  >
+                    {skill}
+                  </Badge>
+                ))}
+                {provider.skills.length > 3 && (
+                  <span className="text-xs text-slate-400">
+                    +{provider.skills.length - 3}
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+          
+          <div className="flex-shrink-0 self-center">
+            {provider.hourly_rate && (
+              <div className="text-right mb-2">
+                <span className="text-lg font-bold text-slate-900">
+                  R{provider.hourly_rate}
+                </span>
+                <span className="text-xs text-slate-400">/hr</span>
+              </div>
+            )}
+            <div className="w-8 h-8 rounded-full bg-slate-100 flex items-center justify-center group-hover:bg-emerald-100 transition-colors">
+              <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-emerald-600" />
+            </div>
+          </div>
+        </div>
+      </Card>
+    </Link>
+  );
+}
