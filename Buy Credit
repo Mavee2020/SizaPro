@@ -1,0 +1,260 @@
+import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
+import { createPageUrl } from "@/utils";
+import { base44 } from "@/api/base44Client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { format } from "date-fns";
+import {
+  Coins,
+  CreditCard,
+  History,
+  ArrowLeft,
+  Loader2,
+  AlertCircle,
+  CheckCircle,
+  Plus,
+  Minus
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { toast } from "sonner";
+import CreditPackageCard from "@/components/credits/CreditPackageCard";
+
+export default function BuyCredits() {
+  const queryClient = useQueryClient();
+  const [user, setUser] = useState(null);
+  const [selectedPackage, setSelectedPackage] = useState(null);
+
+  useEffect(() => {
+    const loadUser = async () => {
+      try {
+        const isAuth = await base44.auth.isAuthenticated();
+        if (isAuth) {
+          const userData = await base44.auth.me();
+          setUser(userData);
+        } else {
+          base44.auth.redirectToLogin();
+        }
+      } catch (e) {
+        base44.auth.redirectToLogin();
+      }
+    };
+    loadUser();
+  }, []);
+
+  const { data: providerProfile, isLoading: profileLoading } = useQuery({
+    queryKey: ["myProvider", user?.email],
+    queryFn: async () => {
+      const providers = await base44.entities.ServiceProvider.filter({ user_email: user.email });
+      return providers[0] || null;
+    },
+    enabled: !!user?.email,
+  });
+
+  const { data: transactions = [] } = useQuery({
+    queryKey: ["transactions", providerProfile?.id],
+    queryFn: async () => {
+      return base44.entities.CreditTransaction.filter(
+        { provider_id: providerProfile.id },
+        "-created_date",
+        20
+      );
+    },
+    enabled: !!providerProfile?.id,
+  });
+
+  const purchaseMutation = useMutation({
+    mutationFn: async (pkg) => {
+      // Create transaction record
+      await base44.entities.CreditTransaction.create({
+        provider_id: providerProfile.id,
+        provider_email: providerProfile.user_email,
+        type: "purchase",
+        amount: pkg.credits,
+        price_zar: pkg.price,
+        description: `Purchased ${pkg.name} package (${pkg.credits} credits)`
+      });
+
+      // Update provider credits
+      await base44.entities.ServiceProvider.update(providerProfile.id, {
+        credits: (providerProfile.credits || 0) + pkg.credits
+      });
+    },
+    onSuccess: () => {
+      toast.success("Credits purchased successfully!");
+      queryClient.invalidateQueries(["myProvider"]);
+      queryClient.invalidateQueries(["transactions"]);
+      setSelectedPackage(null);
+    },
+    onError: () => {
+      toast.error("Failed to process purchase");
+      setSelectedPackage(null);
+    },
+  });
+
+  const handlePurchase = (pkg) => {
+    setSelectedPackage(pkg.id);
+    // Simulate payment processing
+    toast.info("Processing payment...", { duration: 1500 });
+    setTimeout(() => {
+      purchaseMutation.mutate(pkg);
+    }, 1500);
+  };
+
+  if (!user || profileLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+      </div>
+    );
+  }
+
+  if (!providerProfile) {
+    return (
+      <div className="min-h-screen bg-slate-50 py-8">
+        <div className="max-w-2xl mx-auto px-4 text-center">
+          <div className="w-20 h-20 mx-auto bg-amber-100 rounded-2xl flex items-center justify-center mb-6">
+            <AlertCircle className="w-10 h-10 text-amber-600" />
+          </div>
+          <h1 className="text-2xl font-bold text-slate-900 mb-3">Create Your Profile First</h1>
+          <p className="text-slate-600 mb-6">
+            You need a service provider profile before you can purchase credits
+          </p>
+          <Link to={createPageUrl("MyProfile")}>
+            <Button className="bg-emerald-600 hover:bg-emerald-700">
+              Create Profile
+            </Button>
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-50 py-8">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+        {/* Header */}
+        <div className="mb-8">
+          <Link to={createPageUrl("Jobs")}>
+            <Button variant="ghost" className="mb-4">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back to Jobs
+            </Button>
+          </Link>
+          
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-bold text-slate-900">Buy Credits</h1>
+              <p className="mt-1 text-slate-600">
+                Credits are used to respond to job postings
+              </p>
+            </div>
+            
+            <Card className="bg-gradient-to-br from-emerald-500 to-teal-600 text-white border-0 shadow-lg">
+              <CardContent className="p-4 flex items-center gap-4">
+                <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center">
+                  <Coins className="w-6 h-6" />
+                </div>
+                <div>
+                  <p className="text-sm text-emerald-100">Current Balance</p>
+                  <p className="text-3xl font-bold">{providerProfile.credits || 0}</p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+
+        {/* Packages */}
+        <div className="mb-12">
+          <h2 className="text-xl font-bold text-slate-900 mb-6">Choose a Package</h2>
+          <CreditPackageCard 
+            onPurchase={handlePurchase} 
+            loading={purchaseMutation.isPending}
+            selectedPackage={selectedPackage}
+          />
+          <p className="text-center text-sm text-slate-500 mt-4">
+            * 1 credit = 1 job response. Credits never expire.
+          </p>
+        </div>
+
+        {/* Transaction History */}
+        <Card className="border-0 shadow-lg">
+          <CardHeader>
+            <CardTitle className="text-lg flex items-center gap-2">
+              <History className="w-5 h-5 text-slate-400" />
+              Transaction History
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {transactions.length > 0 ? (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead>Type</TableHead>
+                    <TableHead className="text-right">Credits</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {transactions.map((tx) => (
+                    <TableRow key={tx.id}>
+                      <TableCell className="text-slate-600">
+                        {format(new Date(tx.created_date), "dd MMM yyyy, HH:mm")}
+                      </TableCell>
+                      <TableCell>{tx.description}</TableCell>
+                      <TableCell>
+                        <Badge 
+                          variant="secondary"
+                          className={
+                            tx.type === "purchase" 
+                              ? "bg-green-100 text-green-700" 
+                              : tx.type === "usage"
+                              ? "bg-amber-100 text-amber-700"
+                              : tx.type === "refund"
+                              ? "bg-blue-100 text-blue-700"
+                              : "bg-purple-100 text-purple-700"
+                          }
+                        >
+                          {tx.type}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <span className={tx.amount > 0 ? "text-green-600" : "text-red-600"}>
+                          {tx.amount > 0 ? (
+                            <span className="flex items-center justify-end gap-1">
+                              <Plus className="w-3 h-3" />
+                              {tx.amount}
+                            </span>
+                          ) : (
+                            <span className="flex items-center justify-end gap-1">
+                              <Minus className="w-3 h-3" />
+                              {Math.abs(tx.amount)}
+                            </span>
+                          )}
+                        </span>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            ) : (
+              <div className="text-center py-8 text-slate-500">
+                No transactions yet
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+}
