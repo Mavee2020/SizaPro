@@ -1,0 +1,346 @@
+import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
+import { createPageUrl } from "@/utils";
+import { base44 } from "@/api/base44Client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { format } from "date-fns";
+import {
+  MapPin,
+  Calendar,
+  Wallet,
+  Clock,
+  User,
+  Phone,
+  Mail,
+  ArrowLeft,
+  Send,
+  Coins,
+  CheckCircle,
+  AlertCircle,
+  Loader2
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { toast } from "sonner";
+
+export default function JobDetails() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const jobId = urlParams.get("id");
+  const queryClient = useQueryClient();
+  
+  const [user, setUser] = useState(null);
+  const [providerProfile, setProviderProfile] = useState(null);
+  const [showResponseDialog, setShowResponseDialog] = useState(false);
+  const [responseData, setResponseData] = useState({
+    message: "",
+    proposed_price: "",
+    estimated_duration: ""
+  });
+
+  useEffect(() => {
+    const loadUser = async () => {
+      try {
+        const isAuth = await base44.auth.isAuthenticated();
+        if (isAuth) {
+          const userData = await base44.auth.me();
+          setUser(userData);
+          const providers = await base44.entities.ServiceProvider.filter({ user_email: userData.email });
+          if (providers.length > 0) {
+            setProviderProfile(providers[0]);
+          }
+        }
+      } catch (e) {
+        console.log("Not authenticated");
+      }
+    };
+    loadUser();
+  }, []);
+
+  const { data: job, isLoading: jobLoading } = useQuery({
+    queryKey: ["job", jobId],
+    queryFn: async () => {
+      const jobs = await base44.entities.Job.filter({ id: jobId });
+      return jobs[0];
+    },
+    enabled: !!jobId,
+  });
+
+  const { data: existingResponse } = useQuery({
+    queryKey: ["myResponse", jobId, providerProfile?.id],
+    queryFn: async () => {
+      if (!providerProfile) return null;
+      const responses = await base44.entities.JobResponse.filter({
+        job_id: jobId,
+        provider_id: providerProfile.id
+      });
+      return responses[0] || null;
+    },
+    enabled: !!jobId && !!providerProfile,
+  });
+
+  const respondMutation = useMutation({
+    mutationFn: async () => {
+      // Check credits
+      if (providerProfile.credits < 1) {
+        throw new Error("Insufficient credits. Please purchase more credits to respond to jobs.");
+      }
+
+      // Create response
+      await base44.entities.JobResponse.create({
+        job_id: jobId,
+        provider_id: providerProfile.id,
+        provider_email: providerProfile.user_email,
+        message: responseData.message,
+        proposed_price: parseFloat(responseData.proposed_price),
+        estimated_duration: responseData.estimated_duration,
+        status: "pending"
+      });
+
+      // Deduct credit
+      await base44.entities.ServiceProvider.update(providerProfile.id, {
+        credits: providerProfile.credits - 1
+      });
+
+      // Create transaction record
+      await base44.entities.CreditTransaction.create({
+        provider_id: providerProfile.id,
+        provider_email: providerProfile.user_email,
+        type: "usage",
+        amount: -1,
+        description: `Response to job: ${job.title}`,
+        job_id: jobId
+      });
+
+      // Update job response count
+      await base44.entities.Job.update(jobId, {
+        response_count: (job.response_count || 0) + 1
+      });
+    },
+    onSuccess: () => {
+      toast.success("Response submitted successfully!");
+      setShowResponseDialog(false);
+      queryClient.invalidateQueries(["myResponse", jobId]);
+      queryClient.invalidateQueries(["job", jobId]);
+      // Refresh provider profile to update credits
+      window.location.reload();
+    },
+    onError: (error) => {
+      toast.error(error.message || "Failed to submit response");
+    },
+  });
+
+  const handleSubmitResponse = () => {
+    if (!responseData.message || !responseData.proposed_price) {
+      toast.error("Please fill in all required fields");
+      return;
+    }
+    respondMutation.mutate();
+  };
+
+  if (jobLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+      </div>
+    );
+  }
+
+  if (!job) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-center">
+          <h2 className="text-xl font-semibold text-slate-900 mb-2">Job not found</h2>
+          <Link to={createPageUrl("Jobs")}>
+            <Button>Back to Jobs</Button>
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-50 py-8">
+      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
+        {/* Back Button */}
+        <Link to={createPageUrl("Jobs")}>
+          <Button variant="ghost" className="mb-6">
+            <ArrowLeft className="w-4 h-4 mr-2" />
+            Back to Jobs
+          </Button>
+        </Link>
+
+        <div className="grid gap-6">
+          {/* Main Content */}
+          <Card className="border-0 shadow-lg">
+            <CardContent className="p-8">
+              <div className="flex items-start justify-between gap-4 mb-6">
+                <div>
+                  <Badge className="bg-emerald-100 text-emerald-700 mb-3">
+                    {job.category}
+                  </Badge>
+                  <h1 className="text-2xl sm:text-3xl font-bold text-slate-900">
+                    {job.title}
+                  </h1>
+                </div>
+                {job.status === "open" && (
+                  <Badge className="bg-emerald-500 text-white">Open</Badge>
+                )}
+              </div>
+
+              {/* Meta Info */}
+              <div className="flex flex-wrap gap-4 mb-8 text-sm text-slate-600">
+                <span className="flex items-center gap-1.5">
+                  <MapPin className="w-4 h-4 text-slate-400" />
+                  {job.city}, {job.province}
+                </span>
+                {job.deadline && (
+                  <span className="flex items-center gap-1.5">
+                    <Calendar className="w-4 h-4 text-slate-400" />
+                    Due: {format(new Date(job.deadline), "dd MMM yyyy")}
+                  </span>
+                )}
+                <span className="flex items-center gap-1.5">
+                  <Clock className="w-4 h-4 text-slate-400" />
+                  {job.response_count || 0} responses
+                </span>
+              </div>
+
+              {/* Budget */}
+              {(job.budget_min || job.budget_max) && (
+                <div className="bg-emerald-50 rounded-xl p-4 mb-6">
+                  <div className="flex items-center gap-2">
+                    <Wallet className="w-5 h-5 text-emerald-600" />
+                    <span className="text-sm text-emerald-700 font-medium">Budget Range</span>
+                  </div>
+                  <p className="text-2xl font-bold text-emerald-700 mt-1">
+                    R{job.budget_min?.toLocaleString()} - R{job.budget_max?.toLocaleString()}
+                  </p>
+                </div>
+              )}
+
+              {/* Description */}
+              <div className="mb-8">
+                <h2 className="text-lg font-semibold text-slate-900 mb-3">Job Description</h2>
+                <p className="text-slate-600 whitespace-pre-line">{job.description}</p>
+              </div>
+
+              {/* Required Skills */}
+              {job.required_skills?.length > 0 && (
+                <div className="mb-8">
+                  <h2 className="text-lg font-semibold text-slate-900 mb-3">Required Skills</h2>
+                  <div className="flex flex-wrap gap-2">
+                    {job.required_skills.map((skill, idx) => (
+                      <Badge key={idx} variant="secondary" className="bg-slate-100 text-slate-700">
+                        {skill}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Response Button */}
+              {user && providerProfile && job.status === "open" && (
+                <div className="border-t border-slate-200 pt-6">
+                  {existingResponse ? (
+                    <div className="bg-blue-50 rounded-xl p-4 flex items-center gap-3">
+                      <CheckCircle className="w-5 h-5 text-blue-600" />
+                      <div>
+                        <p className="font-medium text-blue-900">You've already responded</p>
+                        <p className="text-sm text-blue-700">
+                          Proposed: R{existingResponse.proposed_price?.toLocaleString()}
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <Button 
+                      size="lg" 
+                      onClick={() => setShowResponseDialog(true)}
+                      className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700"
+                    >
+                      <Send className="w-4 h-4 mr-2" />
+                      Respond to this Job
+                      <span className="ml-2 text-xs bg-white/20 px-2 py-0.5 rounded">
+                        1 Credit
+                      </span>
+                    </Button>
+                  )}
+                </div>
+              )}
+
+              {!user && (
+                <div className="border-t border-slate-200 pt-6">
+                  <Button 
+                    size="lg" 
+                    onClick={() => base44.auth.redirectToLogin()}
+                    className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700"
+                  >
+                    Sign in to Respond
+                  </Button>
+                </div>
+              )}
+
+              {user && !providerProfile && (
+                <div className="border-t border-slate-200 pt-6">
+                  <div className="bg-amber-50 rounded-xl p-4 flex items-start gap-3">
+                    <AlertCircle className="w-5 h-5 text-amber-600 mt-0.5" />
+                    <div>
+                      <p className="font-medium text-amber-900">Create your provider profile first</p>
+                      <p className="text-sm text-amber-700 mb-3">
+                        You need a service provider profile to respond to jobs
+                      </p>
+                      <Link to={createPageUrl("MyProfile")}>
+                        <Button size="sm">Create Profile</Button>
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Client Info */}
+          <Card className="border-0 shadow-lg">
+            <CardHeader>
+              <CardTitle className="text-lg">Posted By</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center">
+                  <User className="w-6 h-6 text-slate-400" />
+                </div>
+                <div>
+                  <p className="font-semibold text-slate-900">{job.client_name}</p>
+                  <p className="text-sm text-slate-500">
+                    Posted {format(new Date(job.created_date), "dd MMM yyyy")}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {/* Response Dialog */}
+      <Dialog open={showResponseDialog} onOpenChange={setShowResponseDialog}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Submit Your Response</DialogTitle>
+            <DialogDescription>
+              This will use 1 credit from your account. You have {providerProfile?.credits || 0} credits.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+ 
