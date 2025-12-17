@@ -1,0 +1,255 @@
+import { useState, useEffect } from "react";
+import { Link } from "react-router-dom";
+import { createPageUrl } from "@/utils";
+import { base44 } from "@/api/base44Client";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { format } from "date-fns";
+import {
+  Briefcase,
+  MapPin,
+  Calendar,
+  MessageSquare,
+  Plus,
+  Eye,
+  Trash2,
+  Loader2,
+  ChevronRight,
+  Users,
+  CheckCircle,
+  XCircle
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { toast } from "sonner";
+
+export default function MyJobs() {
+  const queryClient = useQueryClient();
+  const [user, setUser] = useState(null);
+  const [deleteJobId, setDeleteJobId] = useState(null);
+
+  useEffect(() => {
+    const loadUser = async () => {
+      try {
+        const isAuth = await base44.auth.isAuthenticated();
+        if (isAuth) {
+          const userData = await base44.auth.me();
+          setUser(userData);
+        } else {
+          base44.auth.redirectToLogin();
+        }
+      } catch (e) {
+        base44.auth.redirectToLogin();
+      }
+    };
+    loadUser();
+  }, []);
+
+  const { data: jobs = [], isLoading } = useQuery({
+    queryKey: ["myJobs", user?.email],
+    queryFn: () => base44.entities.Job.filter({ client_email: user.email }, "-created_date"),
+    enabled: !!user?.email,
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (jobId) => base44.entities.Job.delete(jobId),
+    onSuccess: () => {
+      toast.success("Job deleted");
+      queryClient.invalidateQueries(["myJobs"]);
+      setDeleteJobId(null);
+    },
+    onError: () => {
+      toast.error("Failed to delete job");
+    },
+  });
+
+  const openJobs = jobs.filter(j => j.status === "open");
+  const completedJobs = jobs.filter(j => j.status === "completed");
+  const cancelledJobs = jobs.filter(j => j.status === "cancelled");
+
+  if (!user || isLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-emerald-600" />
+      </div>
+    );
+  }
+
+  const statusColors = {
+    open: "bg-emerald-100 text-emerald-700",
+    in_progress: "bg-blue-100 text-blue-700",
+    completed: "bg-slate-100 text-slate-700",
+    cancelled: "bg-red-100 text-red-700",
+  };
+
+  const JobRow = ({ job }) => (
+    <TableRow>
+      <TableCell>
+        <div>
+          <Link 
+            to={createPageUrl(`JobDetails?id=${job.id}`)}
+            className="font-medium text-slate-900 hover:text-emerald-600"
+          >
+            {job.title}
+          </Link>
+          <div className="flex items-center gap-2 mt-1 text-sm text-slate-500">
+            <Badge variant="secondary" className="text-xs">
+              {job.category}
+            </Badge>
+            <span className="flex items-center gap-1">
+              <MapPin className="w-3 h-3" />
+              {job.city || job.province}
+            </span>
+          </div>
+        </div>
+      </TableCell>
+      <TableCell>
+        <Badge className={statusColors[job.status]}>
+          {job.status}
+        </Badge>
+      </TableCell>
+      <TableCell>
+        <Link 
+          to={createPageUrl(`JobResponses?jobId=${job.id}`)}
+          className="flex items-center gap-1 text-emerald-600 hover:text-emerald-700"
+        >
+          <Users className="w-4 h-4" />
+          {job.response_count || 0} responses
+        </Link>
+      </TableCell>
+      <TableCell className="text-slate-500">
+        {format(new Date(job.created_date), "dd MMM yyyy")}
+      </TableCell>
+      <TableCell>
+        <div className="flex items-center gap-2">
+          <Link to={createPageUrl(`JobDetails?id=${job.id}`)}>
+            <Button variant="ghost" size="icon">
+              <Eye className="w-4 h-4" />
+            </Button>
+          </Link>
+          <Button 
+            variant="ghost" 
+            size="icon"
+            onClick={() => setDeleteJobId(job.id)}
+            className="text-red-500 hover:text-red-600 hover:bg-red-50"
+          >
+            <Trash2 className="w-4 h-4" />
+          </Button>
+        </div>
+      </TableCell>
+    </TableRow>
+  );
+
+  return (
+    <div className="min-h-screen bg-slate-50 py-8">
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
+        {/* Header */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
+          <div>
+            <h1 className="text-3xl font-bold text-slate-900">My Posted Jobs</h1>
+            <p className="mt-1 text-slate-600">
+              Manage jobs you've posted and view responses
+            </p>
+          </div>
+          
+          <Link to={createPageUrl("PostJob")}>
+            <Button className="bg-emerald-600 hover:bg-emerald-700">
+              <Plus className="w-4 h-4 mr-2" />
+              Post New Job
+            </Button>
+          </Link>
+        </div>
+
+        {/* Stats */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+          <Card className="border-0 shadow-sm">
+            <CardContent className="p-4 flex items-center gap-4">
+              <div className="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center">
+                <Briefcase className="w-6 h-6 text-emerald-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-slate-900">{openJobs.length}</p>
+                <p className="text-sm text-slate-500">Open Jobs</p>
+              </div>
+            </CardContent>
+          </Card>
+          
+          <Card className="border-0 shadow-sm">
+            <CardContent className="p-4 flex items-center gap-4">
+              <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center">
+                <MessageSquare className="w-6 h-6 text-blue-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-slate-900">
+                  {jobs.reduce((sum, j) => sum + (j.response_count || 0), 0)}
+                </p>
+                <p className="text-sm text-slate-500">Total Responses</p>
+              </div>
+            </CardContent>
+          </Card>
+          
+          <Card className="border-0 shadow-sm">
+            <CardContent className="p-4 flex items-center gap-4">
+              <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center">
+                <CheckCircle className="w-6 h-6 text-slate-600" />
+              </div>
+              <div>
+                <p className="text-2xl font-bold text-slate-900">{completedJobs.length}</p>
+                <p className="text-sm text-slate-500">Completed</p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Jobs Table */}
+        <Card className="border-0 shadow-lg">
+          <Tabs defaultValue="all">
+            <CardHeader className="border-b">
+              <TabsList>
+                <TabsTrigger value="all">All ({jobs.length})</TabsTrigger>
+                <TabsTrigger value="open">Open ({openJobs.length})</TabsTrigger>
+                <TabsTrigger value="completed">Completed ({completedJobs.length})</TabsTrigger>
+              </TabsList>
+            </CardHeader>
+            
+            <CardContent className="p-0">
+              <TabsContent value="all" className="m-0">
+                {jobs.length > 0 ? (
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Job</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Responses</TableHead>
+                        <TableHead>Posted</TableHead>
+                        <TableHead>Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {jobs.map((job) => (
+                        <JobRow key={job.id} job={job} />
+                      ))}
+                    </TableBody>
+                  </Table>
+                ) : (
+                  <div className="text-center py-12">
+ 
